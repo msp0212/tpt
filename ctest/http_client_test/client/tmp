@@ -1,0 +1,6 @@
+GET /1MB.dat HTTP/1.1
+Host: 172.19.13.25
+User-Agent: TestAgent
+Referer: Test123
+Connection: Keep-Alive
+
