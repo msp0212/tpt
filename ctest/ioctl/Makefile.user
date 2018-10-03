@@ -1,0 +1,4 @@
+all: user
+
+user: user_ioctl.c
+	gcc -Wall user_ioctl.c -o $@
