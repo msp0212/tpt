@@ -1,0 +1,3 @@
+*After adding a linux bridge, make sure to either add a rule in iptables to
+forward packet from one lan segment to the other or change the default policy
+for FORWARD chain to ACCEPT in the filter table
