@@ -1,3 +1,16 @@
+Add a linux bridge
+==================
+1. brctl addbr virbrmohit-0
+2. brctl stp virbrmohit-0 on
+3. ifconfig eth0 0.0.0.0 down
+4. ifconfig eth1 0.0.0.0 down
+5. brctl addif virbrmohit-0 eth0
+6. brctl addif virbrmohit-0 eth1
+7. ifconfig eth0 up
+8. ifconfig eth1 up
+9. ifconfig virbrmohit-0 up
+
+
 *After adding a linux bridge, make sure to either add a rule in iptables to
 forward packet from one lan segment to the other or change the default policy
 for FORWARD chain to ACCEPT in the filter table
