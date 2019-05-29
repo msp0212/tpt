@@ -4,7 +4,7 @@
 #include<stdlib.h>
 
 
-#define LINE_SIZE (50 * 1024)
+#define LINE_SIZE (1 * 1024)
 
 int main(int argc, char **argv)
 {
