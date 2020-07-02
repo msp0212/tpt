@@ -26,7 +26,7 @@ endif
 all: $(BIN)
 
 $(BIN) : $(OBJS)
-	$(CC) $(CFLAGS) $(DEFINES) -o $@ $?
+	$(CC) $(CFLAGS) $(DEFINES) -o $@ $^
 
 clean:
 	-@rm -f $(BIN) *.o
