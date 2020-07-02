@@ -2,25 +2,31 @@ ASAN ?= 0
 DEBUG ?= 0
 
 CC = gcc
+
 DEFINES =
-BIN = amp
-SRC = argo_mem_pool.c
+ifeq ($(DEBUG), 1)
+	DEFINES += -DARGO_MEM_POOL_DEBUG
+endif
+INCLUDES := -I .
+
+SRCS := $(wildcard *.c)
+OBJS := $(patsubst %.c, %.o, $(SRCS))
+BIN = argo_mem_pool_test
 
 CFLAGS = -Wall -Werror -g
 ifeq ($(ASAN), 1)
 	CFLAGS += -fsanitize=address
 endif
 
-ifeq ($(DEBUG), 1)
-	DEFINES += -DDEBUG
-endif
-
 .PHONY: clean
+
+%.o : %.c
+	$(CC) $(CFLAGS) $(DEFINES) $(INCLUDES) -c -o $@ $?
 
 all: $(BIN)
 
-$(BIN) : $(SRC)
-	$(CC) $(CFLAGS) $(DEFINES) -o $@ $^
+$(BIN) : $(OBJS)
+	$(CC) $(CFLAGS) $(DEFINES) -o $@ $?
 
 clean:
-	rm -f $(BIN)
+	-@rm -f $(BIN) *.o
