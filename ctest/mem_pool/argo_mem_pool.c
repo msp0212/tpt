@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#define MP_OFFSET_INVALID 0xFFFFFFFF
+#define MP_OFFSET_INVALID 0x00FFFFFF
 
 #ifdef DEBUG
 	#define DEBUG_PRINTF(format, ...) \
@@ -13,119 +13,149 @@
 	#define DEBUG_PRINTF(format, ...) 
 #endif
 
+#define likely(x)      __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
+
+#define MP_METADATA_SZ	(sizeof(uint32_t))
+#define MP_SLAB_BITS	4
+#define MP_OFFSET_BITS	((MP_METADATA_SZ * 8) - MP_SLAB_BITS)
+#define	MP_SLAB_SIZE	(1 << MP_OFFSET_BITS)
+#define MP_SLAB_CNT		(1 << MP_SLAB_BITS)
+#define MP_SLAB_MASK_32	((MP_SLAB_CNT - 1) << MP_OFFSET_BITS)
+
 struct argo_mem_pool {
+	void *mp_start_addr[MP_SLAB_CNT];
 	uint32_t mp_obj_sz;
 	uint32_t mp_obj_cnt;
 	uint32_t mp_free_offset;
-	struct argo_mem_pool **mp_keeper;
-	void *mp_start_addr;
 };
 
 static inline void __mp_free_list_init(
 								void *start_addr,
-								uint32_t offset,
 								uint32_t obj_sz,
-								uint32_t obj_cnt)
+								uint32_t obj_cnt,
+								uint32_t slab_inx)
 {
 	uint8_t *ptr;
 	uint32_t i;
+	uint32_t slab_bits;
+	uint32_t offset = 0;
 
 	ptr = start_addr;
+	slab_bits = slab_inx << MP_OFFSET_BITS;
 	for (i = 0; i < obj_cnt - 1; i++) {
 		DEBUG_PRINTF("ptr %p, offset %u", ptr, offset);
 		offset += obj_sz;
-		*(uint32_t *)ptr = offset;
+		*(uint32_t *)ptr = slab_bits | offset;
 		ptr += obj_sz;
 	}
 	DEBUG_PRINTF("ptr %p, offset %u", ptr, offset);
-	*(uint32_t *)ptr = MP_OFFSET_INVALID;	
-
+	*(uint32_t *)ptr = slab_bits | MP_OFFSET_INVALID;
 	return;
 }
 
-void argo_mem_pool_create(
+struct argo_mem_pool *argo_mem_pool_create(
 						uint32_t obj_sz,
-						uint32_t obj_cnt,
-						struct argo_mem_pool **keeper)
+						uint32_t obj_cnt)
 {
 	struct argo_mem_pool *mp;
-
-	/*Objects should be aligned to 8-byte bounday*/
+	/*reserve first 4 bytes for storing mem pool metadata*/
+	obj_sz += MP_METADATA_SZ;
+	/*Align object on 8-byte boundary*/
 	obj_sz = ((obj_sz + 7) & (-8));
-	*keeper = NULL;
-	if(!(mp = malloc(sizeof(*mp) + (obj_sz * obj_cnt))))
+	if (unlikely((obj_sz * obj_cnt) > MP_SLAB_SIZE)) {
+		DEBUG_PRINTF("Requesting more than 256MB");
+		DEBUG_PRINTF("obj_sz %u obj_cnt %u",obj_sz, obj_cnt);
+		obj_cnt = MP_SLAB_SIZE / obj_sz;
+		DEBUG_PRINTF("Reducing obj_cnt to %u", obj_cnt);
+	}
+	if(unlikely(!(mp = malloc(sizeof(*mp)))))
 		goto done;
-
-	DEBUG_PRINTF("malloc'd address %p", mp);
+	memset(mp, 0, sizeof(*mp));
+	if(unlikely(!(mp->mp_start_addr[0] = malloc(obj_sz * obj_cnt)))) {
+		DEBUG_PRINTF("malloc failed");
+		free(mp);
+		mp = NULL;
+		goto done;
+	}
 	mp->mp_obj_sz = obj_sz;
 	mp->mp_obj_cnt = obj_cnt;
 	mp->mp_free_offset = 0;
-	mp->mp_keeper = keeper;
-	mp->mp_start_addr = (uint8_t *)mp + sizeof(*mp);
-	DEBUG_PRINTF("start addr %p", mp->mp_start_addr);
-	__mp_free_list_init(mp->mp_start_addr, 0, obj_sz, obj_cnt);
-	*keeper = mp;	
+	__mp_free_list_init(mp->mp_start_addr[0], obj_sz, obj_cnt, 0);
 done:
+	return mp;
+}
+
+void argo_mem_pool_destroy(struct argo_mem_pool *mp)
+{
+	int i = 0;
+	for (i = 0; i < MP_SLAB_CNT; i++) {
+		if (mp->mp_start_addr[i]) {
+			free(mp->mp_start_addr[i]);
+		}
+	}
+	free(mp);
 	return;
 }
 
-void argo_mem_pool_destroy(struct argo_mem_pool **keeper)
+static int argo_mem_pool_expand(struct argo_mem_pool *mp, uint32_t inx)
 {
-	free(*keeper);
-	*keeper = NULL;
-	return;
-}
+	int ret = 0;
 
-static void argo_mem_pool_expand(struct argo_mem_pool **mp)
-{
-	struct argo_mem_pool *tmp;
-	uint32_t obj_cnt_old;
-	uint32_t obj_cnt_new;
-
-	DEBUG_PRINTF("Doubling the mem pool size");
-	obj_cnt_old = (*mp)->mp_obj_cnt;
-	obj_cnt_new = obj_cnt_old * 2;
-
-	if (!(tmp = realloc(*mp,
-					sizeof(*tmp) + ((*mp)->mp_obj_sz * obj_cnt_new)))) {
+	DEBUG_PRINTF("Allocating one more slab of size %u at index %u\n",
+							mp->mp_obj_sz * mp->mp_obj_cnt, inx);
+	if (unlikely(inx == MP_SLAB_CNT)) {
+		DEBUG_PRINTF("All slabs exhausted. Can't allocate more memory");
+		ret = 1;
 		goto done;
 	}
-	DEBUG_PRINTF("Realloc'd address %p", tmp);
-	tmp->mp_obj_cnt = obj_cnt_new;
-	tmp->mp_start_addr = (uint8_t *)tmp + sizeof(*tmp);
-	tmp->mp_free_offset = (tmp->mp_obj_sz) * obj_cnt_old;
-	__mp_free_list_init((uint8_t *)tmp->mp_start_addr + tmp->mp_free_offset,
-							tmp->mp_free_offset, tmp->mp_obj_sz, obj_cnt_old);
-	*(tmp->mp_keeper) = tmp;
-	*mp = tmp;
+	if(unlikely(!(mp->mp_start_addr[inx] =
+					malloc(mp->mp_obj_sz * mp->mp_obj_cnt)))) {
+		DEBUG_PRINTF("malloc failed");
+		ret = 1;
+		goto done;
+	}
+	mp->mp_free_offset = inx << MP_OFFSET_BITS;
+	__mp_free_list_init(mp->mp_start_addr[inx],
+							mp->mp_obj_sz, mp->mp_obj_cnt, inx);
+	DEBUG_PRINTF("mp_free_offset %x\n", mp->mp_free_offset);
 done:
-	return;
+	return ret;
 }
 
-uint32_t argo_mem_pool_get(struct argo_mem_pool *mp)
+void *argo_mem_pool_get(struct argo_mem_pool *mp)
+{
+	uint8_t *addr = NULL;
+	uint32_t off;
+	uint32_t inx;
+
+	DEBUG_PRINTF("mp_free_offset %x\n", mp->mp_free_offset);
+	off = mp->mp_free_offset & (~MP_SLAB_MASK_32);
+	inx = mp->mp_free_offset >> MP_OFFSET_BITS;
+	if (off == MP_OFFSET_INVALID) {
+		DEBUG_PRINTF("current mem slab exhausted. Trying to alloc one more");
+		if (argo_mem_pool_expand(mp, inx + 1))
+			goto done;
+		off = mp->mp_free_offset & (~MP_SLAB_MASK_32);
+		inx = mp->mp_free_offset >> MP_OFFSET_BITS;
+	}
+	addr = (uint8_t *)(mp->mp_start_addr[inx]) + off;
+	mp->mp_free_offset = *(uint32_t *)addr;
+	DEBUG_PRINTF("mp_free_offset %x\n", mp->mp_free_offset);
+	addr += MP_METADATA_SZ;
+done:
+	return addr;
+}
+
+void argo_mem_pool_put(struct argo_mem_pool *mp, void *addr)
 {
 	uint32_t offset;
 
-	offset = mp->mp_free_offset;
-	if (offset == MP_OFFSET_INVALID) {
-		DEBUG_PRINTF("mem pool exhausted");
-		argo_mem_pool_expand(&mp);
-	}
-	offset = mp->mp_free_offset;
-	mp->mp_free_offset = *(uint32_t *)((uint8_t *)mp->mp_start_addr + offset);
-	return offset;
-}
-
-void argo_mem_pool_put(struct argo_mem_pool *mp, uint32_t offset)
-{
-	*(uint32_t *)((uint8_t *)mp->mp_start_addr + offset) = mp->mp_free_offset;
+	offset = *(uint32_t *)((uint8_t *)addr - MP_METADATA_SZ);
+	*(uint32_t *)((uint8_t *)addr - MP_METADATA_SZ) = mp->mp_free_offset;
 	mp->mp_free_offset = offset;
-	return;
-}
 
-void *argo_mem_pool_offset_to_addr(struct argo_mem_pool *mp, uint32_t offset)
-{
-	return (void *)((uint8_t *)mp->mp_start_addr + offset);
+	return;
 }
 
 #define PASS "PASSED"
@@ -137,22 +167,20 @@ void *argo_mem_pool_offset_to_addr(struct argo_mem_pool *mp, uint32_t offset)
 /*Get 1 objects from mem pool and put it back*/
 int test1()
 {
-	uint32_t off;
 	char *ptr;
 	struct argo_mem_pool *mp;
 	int ret = 0;
 
-	argo_mem_pool_create(OBJ_SZ, OBJ_CNT, &mp);
+	mp = argo_mem_pool_create(OBJ_SZ, OBJ_CNT);
 
-	off = argo_mem_pool_get(mp);
-	if (off == MP_OFFSET_INVALID) {
-		DEBUG_PRINTF("offset returned from get call is invalid !\n");
+	ptr = argo_mem_pool_get(mp);
+	if (!ptr) {
+		DEBUG_PRINTF("argo_mem_pool_get returned NULL");
 	}
-	ptr = argo_mem_pool_offset_to_addr(mp, off);
 	strcpy(ptr, "ABC_001");
 	printf("object contents: %s\n", ptr);
-	argo_mem_pool_put(mp, off);
-	argo_mem_pool_destroy(&mp);
+	argo_mem_pool_put(mp, ptr);
+	argo_mem_pool_destroy(mp);
 
 	return ret;
 }
@@ -160,30 +188,28 @@ int test1()
 /*Get 4 objects from mem pool and put all of them back*/
 int test2()
 {
-	uint32_t off[OBJ_CNT];
-	char *ptr;
+	char *ptr[OBJ_CNT];
 	struct argo_mem_pool *mp;
 	int ret = 0;
 	int i;
 
-	argo_mem_pool_create(OBJ_SZ, OBJ_CNT, &mp);
+	mp = argo_mem_pool_create(OBJ_SZ, OBJ_CNT);
 
 	for (i = 0; i < OBJ_CNT; i++) {
-		off[i] = argo_mem_pool_get(mp);
-		if (off[i] == MP_OFFSET_INVALID) {
-			DEBUG_PRINTF("offset returned from get call is invalid !\n");
+		ptr[i] = argo_mem_pool_get(mp);
+		if (!ptr[i]) {
+			DEBUG_PRINTF("argo_mem_pool_get returned NULL");
 			ret = 1;
 			goto done;
 		}
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		sprintf(ptr, "ABC_%03d", i);
-		printf("object contents: %s\n", ptr);
+		sprintf(ptr[i], "ABC_%03d", i);
+		printf("object contents: %s\n", ptr[i]);
 	}
 	i--;
 	for ( ; i >= 0; i--) {
-		argo_mem_pool_put(mp, off[i]);
+		argo_mem_pool_put(mp, ptr[i]);
 	}
-	argo_mem_pool_destroy(&mp);
+	argo_mem_pool_destroy(mp);
 done:
 	return ret;
 }
@@ -192,33 +218,30 @@ done:
 #define TEST_OBJ_CNT 5
 int test3()
 {
-	uint32_t off[TEST_OBJ_CNT];
-	char *ptr;
+	char *ptr[TEST_OBJ_CNT];
 	struct argo_mem_pool *mp;
 	int ret = 0;
 	int i;
 
-	argo_mem_pool_create(OBJ_SZ, OBJ_CNT, &mp);
+	mp = argo_mem_pool_create(OBJ_SZ, OBJ_CNT);
 
 	for (i = 0; i < TEST_OBJ_CNT; i++) {
-		off[i] = argo_mem_pool_get(mp);
-		if (off[i] == MP_OFFSET_INVALID) {
+		ptr[i] = argo_mem_pool_get(mp);
+		if (!ptr[i]) {
 			DEBUG_PRINTF("offset returned from get call is invalid !\n");
 			ret = 1;
 			goto done;
 		}
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		sprintf(ptr, "AB_%03d", i);
+		sprintf(ptr[i], "ABC_%03d", i);
 	}
 	for (i = 0; i < TEST_OBJ_CNT; i++) {
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		printf("object contents: %s\n", ptr);
+		printf("object contents: %s\n", ptr[i]);
 	}
 	i--;
 	for ( ; i >= 0; i--) {
-		argo_mem_pool_put(mp, off[i]);
+		argo_mem_pool_put(mp, ptr[i]);
 	}
-	argo_mem_pool_destroy(&mp);
+	argo_mem_pool_destroy(mp);
 done:
 	return ret;
 }
@@ -228,115 +251,90 @@ done:
 #define TEST_OBJ_CNT 9
 int test4()
 {
-	uint32_t off[TEST_OBJ_CNT];
-	char *ptr;
+	char *ptr[TEST_OBJ_CNT];
 	struct argo_mem_pool *mp;
 	int ret = 0;
 	int i;
 
-	argo_mem_pool_create(OBJ_SZ, OBJ_CNT, &mp);
+	mp = argo_mem_pool_create(OBJ_SZ, OBJ_CNT);
 
 	for (i = 0; i < TEST_OBJ_CNT; i++) {
-		off[i] = argo_mem_pool_get(mp);
-		if (off[i] == MP_OFFSET_INVALID) {
-			DEBUG_PRINTF("offset returned from get call is invalid !\n");
+		ptr[i] = argo_mem_pool_get(mp);
+		if (!ptr[i]) {
+			DEBUG_PRINTF("argo_mem_pool_get returned NULL");
 			ret = 1;
 			goto done;
 		}
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		sprintf(ptr, "ABC_%03d", i);
+		sprintf(ptr[i], "ABC_%03d", i);
 	}
 	for (i = 0; i < TEST_OBJ_CNT; i++) {
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		printf("object contents: %s\n", ptr);
+		printf("object contents: %s\n", ptr[i]);
 	}
 	i--;
 	for ( ; i >= 0; i--) {
-		argo_mem_pool_put(mp, off[i]);
+		argo_mem_pool_put(mp, ptr[i]);
 	}
-	argo_mem_pool_destroy(&mp);
+	argo_mem_pool_destroy(mp);
 done:
 	return ret;
 }
 #undef TEST_OBJ_CNT
 
-/*
- * 1. Get 4 objects from the pool
- * 2. Put 2 objects back to the pool
- * 3. Repeat step 1 and 2
- * 4. Get 5 more objects
- * 5. Put the remanining objects back to the pool
- * */
 int test5()
 {
-	uint32_t off[16];
-	char *ptr;
+	char *ptr[16];
 	struct argo_mem_pool *mp;
 	int ret = 0;
 	int i;
 
-	argo_mem_pool_create(OBJ_SZ, OBJ_CNT, &mp);
+	mp = argo_mem_pool_create(OBJ_SZ, OBJ_CNT);
 
 	for (i = 0; i < 4; i++) {
-		off[i] = argo_mem_pool_get(mp);
-		if (off[i] == MP_OFFSET_INVALID) {
-			DEBUG_PRINTF("offset returned from get call is invalid !\n");
+		ptr[i] = argo_mem_pool_get(mp);
+		if (!ptr[i]) {
+			DEBUG_PRINTF("argo_mem_pool_get returned NULL");
 			ret = 1;
 			goto done;
 		}
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		sprintf(ptr, "ABC_%03d", i);
+		sprintf(ptr[i], "ABC_%03d", i);
 	}
 	for (i = 0; i < 4; i++) {
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		printf("object contents: %s\n", ptr);
+		printf("object contents: %s\n", ptr[i]);
 	}
-	argo_mem_pool_put(mp, off[0]);
-	argo_mem_pool_put(mp, off[3]);
+	argo_mem_pool_put(mp, ptr[0]);
+	argo_mem_pool_put(mp, ptr[3]);
 
-	off[0] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[0]);
-	sprintf(ptr, "ABC_%03d", 0);
-	off[3] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[3]);
-	sprintf(ptr, "ABC_%03d", 3);
-	off[4] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[4]);
-	sprintf(ptr, "ABC_%03d", 4);
-	off[5] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[5]);
-	sprintf(ptr, "ABC_%03d", 5);
+	ptr[0] = argo_mem_pool_get(mp);
+	sprintf(ptr[0], "ABC_%03d", 0);
+	ptr[3] = argo_mem_pool_get(mp);
+	sprintf(ptr[3], "ABC_%03d", 3);
+	ptr[4] = argo_mem_pool_get(mp);
+	sprintf(ptr[4], "ABC_%03d", 4);
+	ptr[5] = argo_mem_pool_get(mp);
+	sprintf(ptr[5], "ABC_%03d", 5);
 	for (i = 0; i < 6; i++) {
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		printf("object contents: %s\n", ptr);
+		printf("object contents: %s\n", ptr[i]);
 	}
-	argo_mem_pool_put(mp, off[4]);
-	argo_mem_pool_put(mp, off[5]);
+	argo_mem_pool_put(mp, ptr[4]);
+	argo_mem_pool_put(mp, ptr[5]);
 
-	off[6] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[6]);
-	sprintf(ptr, "ABC_%03d", 6);
-	off[7] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[7]);
-	sprintf(ptr, "ABC_%03d", 7);
-	off[8] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[8]);
-	sprintf(ptr, "ABC_%03d", 8);
-	off[4] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[4]);
-	sprintf(ptr, "ABC_%03d", 4);
-	off[5] = argo_mem_pool_get(mp);
-	ptr = argo_mem_pool_offset_to_addr(mp, off[5]);
-	sprintf(ptr, "ABC_%03d", 5);
+	ptr[6] = argo_mem_pool_get(mp);
+	sprintf(ptr[6], "ABC_%03d", 6);
+	ptr[7] = argo_mem_pool_get(mp);
+	sprintf(ptr[7], "ABC_%03d", 7);
+	ptr[8] = argo_mem_pool_get(mp);
+	sprintf(ptr[8], "ABC_%03d", 8);
+	ptr[4] = argo_mem_pool_get(mp);
+	sprintf(ptr[4], "ABC_%03d", 4);
+	ptr[5] = argo_mem_pool_get(mp);
+	sprintf(ptr[5], "ABC_%03d", 5);
 	for (i = 0; i < 9; i++) {
-		ptr = argo_mem_pool_offset_to_addr(mp, off[i]);
-		printf("object contents: %s\n", ptr);
+		printf("object contents: %s\n", ptr[i]);
 	}
 	for (i = 0; i < 9; i++) {
-		argo_mem_pool_put(mp, off[i]);
+		argo_mem_pool_put(mp, ptr[i]);
 	}
-
-	argo_mem_pool_destroy(&mp);
+	argo_mem_pool_destroy(mp);
 done:
 	return ret;
 }
@@ -350,6 +348,5 @@ int main()
 	printf("test3 - %s\n", test3() ? FAIL : PASS);
 	printf("test4 - %s\n", test4() ? FAIL : PASS);
 	printf("test5 - %s\n", test5() ? FAIL : PASS);
-
 	return 0;
 }
