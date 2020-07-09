@@ -8,7 +8,7 @@ struct log_object {
 	TAILQ_ENTRY(log_object) log_q_entry;
 };
 
-#define MAX_OBJS 5
+#define MAX_OBJS 16
 
 TAILQ_HEAD(log_object_q_head, log_object);
 
@@ -110,36 +110,63 @@ void tailq_traverse_reverse_from_entry(struct log_object_q_head *head,
 	}
 }
 
-int main()
+int test1()
 {
 	struct log_object_q_head log_obj_q;
 
+	printf("Running %s\n", __func__);
 	TAILQ_INIT(&log_obj_q);
-
-	printf("test1\n");
 	tailq_create_tail(&log_obj_q);
 	tailq_traverse(&log_obj_q);
 	tailq_traverse_reverse(&log_obj_q);
 	tailq_destroy_head(&log_obj_q);
+	printf("Done %s\n", __func__);
 
+	return 0;
+}
 
-	printf("test2\n");
+int test2()
+{
+	struct log_object_q_head log_obj_q;
+	struct log_object *obj;
+	int i;
+
+	printf("Running %s\n", __func__);
+	TAILQ_INIT(&log_obj_q);
 	tailq_create_head(&log_obj_q);
 	tailq_traverse(&log_obj_q);
-
 	{
-		struct log_object *obj = TAILQ_FIRST(&log_obj_q);
+		obj = TAILQ_FIRST(&log_obj_q);
 		obj = TAILQ_NEXT(obj, log_q_entry);
 		tailq_traverse_from_entry(&log_obj_q, obj);
 	}
-
+	printf("---------\n");
 	{
-		struct log_object *obj = TAILQ_LAST(&log_obj_q, log_object_q_head);
+		obj = TAILQ_LAST(&log_obj_q, log_object_q_head);
 		obj = TAILQ_PREV(obj, log_object_q_head, log_q_entry);
 		tailq_traverse_reverse_from_entry(&log_obj_q, obj);
 	}
-
+	printf("---------\n");
+	{
+		printf("Remove 5 objects and print the queue");
+		for (i = 0; i < 5; i++) {
+			obj = TAILQ_FIRST(&log_obj_q);
+			TAILQ_REMOVE(&log_obj_q, obj, log_q_entry);
+		}
+		tailq_traverse(&log_obj_q);	
+		printf("Done\n");
+	}
 	tailq_destroy_tail(&log_obj_q);
+	printf("Done %s\n", __func__);
+
+	return 0;
+}
+
+int main()
+{
+	
+	(void) test1();
+	(void) test2();
 
 	return 0;
 }
