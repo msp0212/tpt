@@ -1,7 +1,7 @@
 #ifndef __ARGO_MEM_POOL_H__
 #define __ARGO_MEM_POOL_H__
 
-#ifdef ARGO_MEM_POOL_DEBUG
+#ifdef ARGO_TEST_DEBUG
 	#define DEBUG_PRINTF(format, ...) \
 		printf("DEBUG:%s:%u:%s() "format"\n", \
 				__FILE__, __LINE__, __func__, ##__VA_ARGS__)

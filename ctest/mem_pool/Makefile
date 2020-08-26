@@ -5,13 +5,13 @@ CC = gcc
 
 DEFINES =
 ifeq ($(DEBUG), 1)
-	DEFINES += -DARGO_MEM_POOL_DEBUG
+	DEFINES += -DARGO_TEST_DEBUG
 endif
 INCLUDES := -I .
 
 SRCS := $(wildcard *.c)
 OBJS := $(patsubst %.c, %.o, $(SRCS))
-BIN = argo_mem_pool_test
+BIN = argo_test_mem_pool
 
 CFLAGS = -Wall -Werror -g
 ifeq ($(ASAN), 1)
