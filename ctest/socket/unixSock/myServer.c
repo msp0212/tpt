@@ -18,6 +18,7 @@ void *clientHandler(void *arg)
 
 	printf("Total connected clients = %d\n",g_ClientCount);
 	cliSock =(int*)arg; 
+	sleep(3600);
 	while(1)
 	{
 		len = recv(*cliSock,buf,sizeof(buf),0);
