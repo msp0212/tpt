@@ -162,6 +162,21 @@ int test2()
 	return 0;
 }
 
+int test3()
+{
+	struct log_object_q_head log_obj_q;
+	struct log_object *obj;
+	TAILQ_INIT(&log_obj_q);
+
+    obj = calloc(1, sizeof(*obj));
+    obj->log_id = 111;
+
+    TAILQ_REMOVE(&log_obj_q, obj, log_q_entry);
+	printf("obj = %p\n", obj);
+
+	return 0;
+}
+
 int main()
 {
 	

@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
 #include <aio.h>
-//#include <aiocb.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #define ALLOC_SIZE 4096
 #define REALLOC_THRESHOLD 128
