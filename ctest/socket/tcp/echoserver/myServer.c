@@ -9,8 +9,8 @@
 #include <pthread.h>
 #include <signal.h>
 
-#define IP_ADDRESS "172.19.13.25"
-#define PORT	8001
+#define IP_ADDRESS "127.0.0.1"
+#define PORT	19000
 #define MAX_LENGTH 1024
 
 void *Handler(void *arg);
