@@ -187,6 +187,20 @@ done:
 }
 #undef TEST_OBJ_CNT
 
+int test6(void) 
+{
+	struct argo_mem_pool *mp;
+	void *addr;
+	int i;
+
+	mp = argo_mem_pool_create(8, 2);
+	for (i = 0; i < 50; i++) {
+		addr = argo_mem_pool_get(mp);
+	}
+	addr++;
+	return 0;
+}
+
 
 int main()
 {
@@ -195,5 +209,6 @@ int main()
 	printf("test3 - %s\n", test3() ? FAIL : PASS);
 	printf("test4 - %s\n", test4() ? FAIL : PASS);
 	printf("test5 - %s\n", test5() ? FAIL : PASS);
+	printf("test6 - %s\n", test6() ? FAIL : PASS);
 	return 0;
 }

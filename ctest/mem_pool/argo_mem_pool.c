@@ -2,15 +2,12 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <assert.h>
 
 #include "argo_mem_pool.h"
-#if 0
 #include "argo_log.h"
 #include "argo_private.h"
-#endif
 
-#define ARGO_ALLOC malloc
-#define ARGO_FREE free
 
 /* argo collection queue object mem pool
  * 
@@ -36,8 +33,8 @@
  *
  * -First 8 bytes(64 bits) in the each object is reserved for mem pool metadata.
  *  Yes, there is an overhead of 8 bytes per object
- * -28 lesser significant bits(0-27) represent offset of object within a slab.
- *  Remaining more significant bits(28-63) represent index of slab within pool
+ * -28 lower significant bits(0-27) represent offset of object within a slab.
+ *  Remaining higher significant bits(28-63) represent index of slab within pool
  *
  * -Each slab is contiguous memory block of size = mp_obj_sz * mp_obj_cnt
  *  Slab size is capped at 256MB (28 bits for offset)
@@ -45,6 +42,10 @@
  *
  * -mem pool get() and put() operations run in O(1)
  * -addresses returned by get() operation are guaranteed to be 8-byte aligned
+ *
+ * -Implementation is done keeping in mind that this mem pool will be used
+ *  for alloc/free of fixed size small objects. It should be used to reduce the
+ *  alloc/free overhead for small sized objects.
  *
  * */
 
@@ -58,11 +59,9 @@
 #define MP_METADATA_SZ	(sizeof(MP_METADATA_TYPE))
 
 #define MP_OFFSET_BITS		28
-#define MP_OFFSET_INVALID	0x00FFFFFF
+#define MP_OFFSET_MASK		(((MP_METADATA_TYPE)1 << MP_OFFSET_BITS) - 1)
+#define MP_OFFSET_INVALID	MP_OFFSET_MASK
 
-#define MP_SLAB_BITS		((MP_METADATA_SZ * 8) - MP_OFFSET_BITS)
-#define MP_SLAB_MASK \
-		((((MP_METADATA_TYPE)1 << MP_SLAB_BITS) - 1) << MP_OFFSET_BITS)
 #define MP_SLAB_SIZE		(1 << MP_OFFSET_BITS)
 #define MP_SLABS_MAX		4096	/*can support upto 1024GB*/
 
@@ -70,30 +69,54 @@
 struct argo_mem_pool {
 	void *slabs[MP_SLABS_MAX]; /*32KB*/
 	MP_METADATA_TYPE  mp_free_next;
+	uint64_t mp_slab_cnt;
 	uint32_t mp_obj_sz;
 	uint32_t mp_obj_cnt;
 };
 
-static inline void __mp_free_list_init(
-								void *start_addr,
-								uint32_t obj_sz,
-								uint32_t obj_cnt,
-								MP_METADATA_TYPE slab_inx)
-{
-	uint8_t *ptr;
-	uint32_t i;
-	MP_METADATA_TYPE slab;
-	MP_METADATA_TYPE next_offset = 0;
 
-	ptr = start_addr;
+static inline void __mp_free_list_init(void *addr, uint32_t obj_sz,
+										uint32_t obj_cnt, uint64_t slab_inx)
+{
+	uint64_t slab;
+	MP_METADATA_TYPE next_free = 0;
+	uint32_t i;
+
 	slab = slab_inx << MP_OFFSET_BITS;
 	for (i = 0; i < obj_cnt - 1; i++) {
-		next_offset += obj_sz;
-		*(MP_METADATA_TYPE *)ptr = slab | next_offset;
-		ptr += obj_sz;
+		next_free += obj_sz;
+		*(MP_METADATA_TYPE *)addr = slab | next_free;
+		addr += obj_sz;
 	}
-	*(MP_METADATA_TYPE *)ptr = slab | MP_OFFSET_INVALID;
-	return;
+	*(MP_METADATA_TYPE *)addr = slab | MP_OFFSET_INVALID;
+}
+
+static inline void __mp_adjust_size_and_count(uint32_t *sz, uint32_t *cnt)
+{
+	/*reserve space for mem pool metadata*/
+	(*sz) += MP_METADATA_SZ;
+	/*Align object on 8-byte boundary*/
+	(*sz) = (((*sz) + 7) & (-8));
+	if (unlikely(((*sz) * (*cnt)) > MP_SLAB_SIZE)) {
+		_ARGO_LOG(AL_WARNING, "mem pool create with initial memory > %u",
+															MP_SLAB_SIZE);
+		*cnt = MP_SLAB_SIZE / (*sz);
+	}
+}
+
+static inline int __mp_create_new_slab(struct argo_mem_pool *mp)
+{	
+	uint64_t slab_cnt = mp->mp_slab_cnt;
+	uint32_t obj_sz = mp->mp_obj_sz;
+	uint32_t obj_cnt = mp->mp_obj_cnt;
+
+	if(unlikely(!(mp->slabs[slab_cnt] = ARGO_ALLOC(obj_sz * obj_cnt)))) {
+		return 1;
+	}
+	__mp_free_list_init(mp->slabs[slab_cnt], obj_sz, obj_cnt, slab_cnt);
+	mp->mp_free_next = (MP_METADATA_TYPE)slab_cnt << MP_OFFSET_BITS;
+	(mp->mp_slab_cnt)++;
+	return 0;
 }
 
 struct argo_mem_pool *argo_mem_pool_create(
@@ -102,103 +125,87 @@ struct argo_mem_pool *argo_mem_pool_create(
 {
 	struct argo_mem_pool *mp;
 
-	/*reserve space for mem pool metadata*/
-	obj_sz += MP_METADATA_SZ;
-
-	/*Align object on 8-byte boundary*/
-	obj_sz = ((obj_sz + 7) & (-8));
-
-	if (unlikely((obj_sz * obj_cnt) > MP_SLAB_SIZE)) {
-		//_ARGO_LOG(AL_WARNING, "mem pool create with initial memory > 256MB !");
-		DEBUG_PRINTF("obj_sz %u obj_cnt %u",obj_sz, obj_cnt);
-		obj_cnt = MP_SLAB_SIZE / obj_sz;
-		DEBUG_PRINTF("Reducing obj_cnt to %u", obj_cnt);
-	}
+	__mp_adjust_size_and_count(&obj_sz, &obj_cnt);
 
 	if(unlikely(!(mp = ARGO_ALLOC(sizeof(*mp)))))
 		return NULL;
 
 	memset(mp, 0, sizeof(*mp));
-	if(unlikely(!(mp->slabs[0] = ARGO_ALLOC(obj_sz * obj_cnt)))) {
+	mp->mp_obj_sz = obj_sz;
+	mp->mp_obj_cnt = obj_cnt;
+
+	if (__mp_create_new_slab(mp)) {
 		ARGO_FREE(mp);
 		return NULL;
 	}
 
-	mp->mp_obj_sz = obj_sz;
-	mp->mp_obj_cnt = obj_cnt;
-	mp->mp_free_next = 0;
-	__mp_free_list_init(mp->slabs[0], obj_sz, obj_cnt, 0);
 	return mp;
 }
 
 void argo_mem_pool_destroy(struct argo_mem_pool *mp)
 {
 	int i = 0;
+
 	for (i = 0; i < MP_SLABS_MAX; i++) {
 		if (mp->slabs[i]) {
 			ARGO_FREE(mp->slabs[i]);
 		}
 	}
 	ARGO_FREE(mp);
-	return;
 }
 
-static int argo_mem_pool_expand(struct argo_mem_pool *mp, uint32_t inx)
+static int argo_mem_pool_expand(struct argo_mem_pool *mp)
 {
-	int ret = 0;
-
-	DEBUG_PRINTF("Allocating one more slab of size %u at index %u\n",
-							mp->mp_obj_sz * mp->mp_obj_cnt, inx);
-	if (unlikely(inx == MP_SLABS_MAX)) {
-		//_ARGO_LOG(AL_ERROR, "All slabs exhausted. Can't allocate more memory");
-		ret = 1;
-		goto done;
+	if (unlikely(mp->mp_slab_cnt == MP_SLABS_MAX)) {
+		_ARGO_LOG(AL_ERROR, "All slabs exhausted. Can't allocate more memory");
+		return 1;
 	}
-	if(unlikely(!(mp->slabs[inx] =
-					ARGO_ALLOC(mp->mp_obj_sz * mp->mp_obj_cnt)))) {
-		ret = 1;
-		goto done;
+	if (__mp_create_new_slab(mp)) {
+		return 2;
 	}
-	mp->mp_free_next = inx << MP_OFFSET_BITS;
-	__mp_free_list_init(mp->slabs[inx],
-							mp->mp_obj_sz, mp->mp_obj_cnt, inx);
-done:
-	return ret;
+	return 0;
 }
+
+#define __MP_METADATA_TO_INX_AND_OFFSET(metadata, inx, offset) \
+	do { \
+		(offset) = (metadata) & MP_OFFSET_MASK; \
+		(inx) = (metadata) >> MP_OFFSET_BITS; \
+	} while (0)
+
+#define __MP_INX_AND_OFFSET_TO_ADDR(inx, offset) \
+					(uint8_t *)((mp->slabs[(inx)]) + (offset))
 
 void *argo_mem_pool_get(struct argo_mem_pool *mp)
 {
 	uint8_t *addr = NULL;
+	uint64_t inx;
 	uint32_t offset;
-	uint32_t inx;
 
-	offset = mp->mp_free_next & ~MP_SLAB_MASK;
-	inx = mp->mp_free_next >> MP_OFFSET_BITS;
+	__MP_METADATA_TO_INX_AND_OFFSET(mp->mp_free_next, inx, offset);
 
 	if (unlikely(offset == MP_OFFSET_INVALID)) {
-		DEBUG_PRINTF("current mem slab exhausted. Trying to alloc one more");
-
-		if (unlikely(argo_mem_pool_expand(mp, inx + 1)))
+		/*current slab exhausted*/
+		if (unlikely(argo_mem_pool_expand(mp)))
 			return NULL;
-
-		offset = mp->mp_free_next & (~MP_SLAB_MASK);
-		inx = mp->mp_free_next >> MP_OFFSET_BITS;
+		__MP_METADATA_TO_INX_AND_OFFSET(mp->mp_free_next, inx, offset);
 	}
 
-	addr = (uint8_t *)(mp->slabs[inx]) + offset;
+	addr = __MP_INX_AND_OFFSET_TO_ADDR(inx, offset);
 	mp->mp_free_next = *(MP_METADATA_TYPE *)addr;
-	addr += MP_METADATA_SZ;
-	return addr;
+	/*remember slab and offset of the address before giving it out*/
+	*(MP_METADATA_TYPE *)addr = (inx << MP_OFFSET_BITS) | offset;
+
+	return addr + MP_METADATA_SZ;
 }
 
 void argo_mem_pool_put(struct argo_mem_pool *mp, void *addr)
 {
-	MP_METADATA_TYPE next_free;
-	MP_METADATA_TYPE *metadata_ptr;
+	MP_METADATA_TYPE *metadata;
+	MP_METADATA_TYPE new_free;
 
-	metadata_ptr = (MP_METADATA_TYPE *)((uint8_t *)addr - MP_METADATA_SZ);
+	metadata = (MP_METADATA_TYPE *)((uint8_t *)addr - MP_METADATA_SZ);
 
-	next_free = *metadata_ptr;
-	*metadata_ptr = mp->mp_free_next;
-	mp->mp_free_next = next_free;
+	new_free = *metadata;
+	*metadata = mp->mp_free_next;
+	mp->mp_free_next = new_free;
 }
