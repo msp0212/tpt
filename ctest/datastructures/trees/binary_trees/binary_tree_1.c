@@ -27,6 +27,11 @@ static void bfs_test(void);
 static inline void print_func_name(const char *func_name);
 static inline void print_new_line(void);
 
+static int tree_node_find_level(struct tree_node *root, int data, int level);
+static int tree_nodes_are_siblings(struct tree_node *root, int node1, int node2);
+static int tree_nodes_are_cousins(struct tree_node *root, int node1, int node2);
+static void cousin_test(void);
+
 static inline void print_func_name(const char *func_name)
 {
 	printf("%s\n", func_name);
@@ -195,7 +200,7 @@ void bfs_print(struct tree_node *root)
 	for (i = 1; i <= height; i++) {
 		bfs_print_level(root, i);
 	}
-	
+	print_new_line();	
 }
 
 void bfs_test(void)
@@ -211,9 +216,74 @@ void bfs_test(void)
 	return;
 }
 
+static int tree_node_find_level(struct tree_node *root, int data, int level)
+{
+	int ret;
+
+	if (!root) return 0;
+
+	if (root->data == data) return level;
+
+	ret = tree_node_find_level(root->left, data, level + 1);
+	if (ret) return ret;
+
+	return tree_node_find_level(root->right, data, level + 1);
+
+}
+
+static int tree_nodes_are_siblings(struct tree_node *root, int node1, int node2)
+{
+	if (!root) return 0;
+
+	if (!root->left || !root->right) return 0;
+
+	if ((root->left->data == node1 && root->right->data == node2) ||
+		(root->left->data == node2 && root->right->data == node1))
+		return 1;
+	if (tree_nodes_are_siblings(root->left, node1, node2)) return 1;
+
+	return tree_nodes_are_siblings(root->right, node1, node2);
+	 
+}
+
+static int tree_nodes_are_cousins(struct tree_node *root, int node1, int node2)
+{
+	int l1, l2, are_siblings;
+
+	l1 = tree_node_find_level(root, node1, 0);
+	l2 = tree_node_find_level(root, node2, 0);
+	are_siblings = tree_nodes_are_siblings(root, node1, node2);
+
+	printf("%d is at level %d and %d is at level %d. siblings - %d\n",
+					node1, l1, node2, l2, are_siblings);
+
+	return (l1 == l2 && !are_siblings);
+}
+
+static void cousin_test(void)
+{
+	struct tree_node *root;
+
+	print_func_name(__func__);
+
+	root = tree_create_bfs_test();
+
+	printf("7 and 1 are cousins ? - %s\n", 
+			tree_nodes_are_cousins(root, 7, 1) ? "YES": "NO");
+	printf("3 and 5 are cousins ? - %s\n", 
+			tree_nodes_are_cousins(root, 3, 5) ? "YES": "NO");
+	printf("7 and 5 are cousins ? - %s\n", 
+			tree_nodes_are_cousins(root, 7, 5) ? "YES": "NO");
+
+
+	print_new_line();
+	return;
+}
+
 int main(void)
 {
 	height_test();
 	bfs_test();
+	cousin_test();
 	return 0;
 }
