@@ -13,7 +13,7 @@ struct binary_heap {
 struct binary_heap *binary_heap_create(int size);
 void binary_heap_destory(struct binary_heap **heap);
 void binary_heap_print(struct binary_heap *heap);
-/*simpy add an element to binary heap without fixing the heap property*/
+/*simply add an element to binary heap without fixing the heap property*/
 void binary_heap_add(struct binary_heap *heap, int elem);
 /*add an element to a binary heap and fix the heap property*/
 void binary_heap_add_and_fix_min(struct binary_heap *heap, int elem);
