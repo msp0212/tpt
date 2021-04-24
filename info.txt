@@ -1,0 +1,13 @@
+### c macros pitfalls ######
+
+#surround all usage of parameters in the definition by parentheses
+Consider this case
+    void ptr; . . . . . MY_MACRO((type_t)ptr, ARG_2);
+	
+#Remove ending semicolon (;)
+Consider case
+    if (cond)
+        MY_MACRO(arg1);
+    else
+        // do something else
+This code looks valid but cannot be even compiled.
