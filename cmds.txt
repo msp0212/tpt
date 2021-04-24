@@ -1,0 +1,304 @@
+
+### GIT ### 
+#clone full repo locally 
+git clone <url to *.git> 
+#clone a specific branch 
+git clone --single-branch --branch <branchname> <remote-repo> 
+#checkout a specific tag 
+git checkout tags/20.40.3 -b 20.20.3 
+#delete a branch 
+#display all branches - local as well as remote 
+git branch -a 
+#delete a branch 
+git branch -d <branch_name> 
+# pull specific dir from repo 
+git init 
+git remote add [REMOTE_NAME] [GIT_URL] 
+git fetch REMOTE_NAME 
+git checkout REMOTE_NAME/BRANCH -- path/to/directory
+#sync to latest changes 
+git pull 
+#get changes from another branch 
+git merge 
+or 
+git rebase 
+https://stackoverflow.com/questions/804115/when-do-you-use-git-rebase-instead-of-git-merge/8 04178#804178 
+#list all modified files 
+git ls-files --modified 
+#add all modified files 
+git add -u 
+● git add -A stages all changes 
+● git add . stages new files and modifications, without deletions 
+● git add -u stages modifications and deletions, without new files 
+#add all files including untracked ones 
+git add -A 
+#view history for a dir 
+git history -- path/to/folder 
+#view unpushed changes 
+git log origin/develop...HEAD 
+git diff origin/develop...HEAD
+#remove unpushed commits 
+Delete the most recent commit, keeping the work you've done: 
+git reset --soft HEAD~1 
+Delete the most recent commit, destroying the work you've done: 
+git reset --hard HEAD~1 
+git reset --hard origin 
+#revert file to previous commit 
+git checkout c5f567 -- file1/to/restore file2/to/restore 
+If you want to revert to the commit before c5f567, append ~1 (where 1 is the number of commits you want to go back, it can be anything): 
+git checkout c5f567~1 -- file1/to/restore file2/to/restore 
+#set vimdiff as git diff and merge tool 
+#remove --global to set it for current repository only 
+git config --global diff.tool vimdiff 
+git config --global merge.tool vimdiff 
+git config --global merge.conflictstyle diff3 
+git config --global mergetool.prompt false 
+git config --global difftool.prompt false 
+
+###ASAN### 
+https://github.com/google/sanitizers/wiki/AddressSanitizer
+https://github.com/google/sanitizers/wiki/SanitizerCommonFlags 
+#Build machine prerequisites: 
+yum -y install centos-release-scl-rh 
+yum -y install devtoolset-9 devtoolset-9-lib*-devel 
+Run machine prerequisites: 
+yum -y install centos-release-scl-rh 
+#compile 
+gcc -Wall -g -fsanitize=address mem_corr.c -o mc 
+#Running asan binary 
+yum install llvm 
+export ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer 
+ASAN_OPTIONS=symbolize=1 <executable> 
+ASAN_OPTIONS 
+symbolize=1 
+abort_on_error=0 
+disable_coredump=0 
+halt_on_error=0 
+detect_leaks=0 
+E.g. 
+ASAN_OPTIONS=symbolize=1:abort_on_error=0:disable_coredump=0:halt_on_error=0 ./a.out
+
+### mac ### 
+#install third party applications on mac 
+sudo spctl --master-disable 
+
+### RPM ### 
+#query 
+rpm -qa | grep <rpm_name> 
+#erase 
+rpm -e <rpm_name> 
+#install 
+rpm -ivh <rpm_package 
+#extract files from rpm package 
+rpm2cpio /path/to/rpm-file | cpio -idmv
+
+### network troubleshooting ### 
+### mtr - network diagnostic tool 
+mtr -rwbec100 <ip addr> 
+### openssl ### 
+openssl x509 -text -noout -in test2.pem 
+
+### Python ### 
+#run a python http server with current directory as webcontent directory
+python3 -m http.server
+
+### Docker ### 
+#run a container 
+docker run -idt --name centos1 centos /bin/bash 
+#save a runnning container 
+docker commit centos1 centos1_zconnector 
+-check the image 
+docker image ls 
+#docker save an image to tar archive 
+docker save centos1_zconnector:latest | gzip > centos1_zconnector.tar.gz 
+
+### IPTABLES ### 
+#list iptables rules 
+iptables -L -v 
+#misc 
+iptables -A OUTPUT -p tcp -d 10.102.34.201 -j DROP 
+iptables -t nat -A POSTROUTING -s 10.102.34.204/32 -j SNAT --to-source 10.102.34.190 iptables -t nat -A POSTROUTING -s 10.102.34.191/32 -j SNAT --to-source 10.102.34.190
+
+### GDB ### 
+#examine memory 
+x/nfu addr 
+format - x/d/u/o/t(binary)/a(ddr)/c/f/s/ 
+unit - b(yte)/h(alfword - 2)/w/(ord - 4)/g(iant - 8) 
+#get back_trace 
+(gdb) define get_trace 
+Type commands for definition of "get_trace". End with a line saying just "end". 
+set $_i = 0 
+set $_ip = $eip 
+set $_fr = $ebp 
+while ($_fr != 0) 
+printf "%d: %p: %p :", $_i, $_ip, $_fr 
+info line *$_ip 
+set $_i = $_i + 1 
+set $_ip = ((unsigned int*)($_fr))[1] 
+set $_fr = ((unsigned int*)($_fr))[0] 
+end 
+(gdb) 
+(gdb) get_trace 
+#thread debugging 
+thread apply all where 
+# log to file 
+set pagination off 
+set logging on file1.txt
+
+### curl ### 
+#limit download rate 
+curl -v --limit-rate 500 http://10.102.34.201/10MB.dat -o out 
+#upload a file 
+curl -X POST -d @test.txt http://10.102.34.192 -v 
+#timeout 
+curl --connect-timeout 86400 --max-time 86400 -v http://10.102.34.192/alpha.html 
+
+### vim hacks ### 
+#remove ending whitespaces 
+:%s/\s\+$//e 
+#80 line marker, put in vimrc 
+set colorcolumn=80 
+highlight ColorColumn ctermbg=1 guibg=lightgrey 
+### change timestamp of file ### 
+touch -mt '201712111005.07' file.h 
+touch file.c
+
+### memory usage by process ###
+ps aux --sort -rss | grep chrome | awk -F' +' '{sum+=$6} END {print sum}' 
+
+###HTTP PIPELINE REQUESTS #### 
+(echo -en "GET /1.html HTTP/1.1\nHost: 172.19.13.25\nConnection: Keep-Alive\n\nGET /new.php HTTP/1.1\nHost: 172.19.13.25\nConnection: Keep-Alive\n\n"; sleep 10) | telnet 172.19.13.25 80 
+(cat client/tmp1.txt ; sleep 10) | telnet 172.19.13.25 80 
+
+### IP Transparency ### 
+/* 
+* # iptables -t mangle -N DIVERT 
+* # iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT 
+* # iptables -t mangle -A DIVERT -j MARK --set-mark 1 
+* # iptables -t mangle -A DIVERT -j ACCEPT 
+* # ip rule add fwmark 1 lookup 100 
+* # ip route add local 0.0.0.0/0 dev lo table 100 
+* # iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 9401 
+* 
+*/ 
+and the listening sokcet should be SOL_IP IP_TRANSPARENT 
+
+####Run Memcached Server######
+memcached -d -m 64 -u root -l0.0.0.0 -p11211 -t 50 -n 1024 
+memcached -d -m 64 -u root -l0.0.0.0 -p11211 -t 25 -n 102400
+
+####Run MongoDb #### 
+numactl --interleave=all /root/setups/mongodb/bin/mongod --port 4999 --objcheck --quiet --slowms 10000 --config mongodb.config & 
+numactl --interleave=all /root/setups/mongodb/bin/mongod --port 4999 --objcheck --quiet --slowms 10000 --config mongodb.config & 
+numactl --interleave=all /prd/mdp/cem/masterlogserver/mongo/bin/mongod --port 9999 --objcheck --quiet --slowms 10000 --maxConns 1500 --config mongodb.config & 
+
+##### Code Coverage ### 
+1.Install lcov package 
+2.compile the code with -fprofile-arcs and -ftest-coverage flags(generate gcno file) 3.Run the binary 
+4.gcda file is created. 
+5.Run this command : 
+lcov --capture --directory /path/to/source/code --output-file coverage.info 6.Run this command : 
+genhtml coverage.info --output-directory /tmp/out 
+
+###list of all users### 
+cat /etc/passwd | cut -d: -f 1,3,6 | grep "[5-9][0-9][0-9]" | grep "/home" | cut -d: -f1 
+
+### Check services enabled on startup### 
+chkconfig --list | grep $(runlevel | awk '{ print $2}'):on
+
+### PRINT GID of a process ###
+ps -eo pid,uid,gid,args 
+
+### CHECK MEMORY USAGE PER PROCESS ### 
+ps -e -orss=,args= | sort -b -k1,1n | /usr/bin/pr -TW$COLUMNS 
+
+##### VALGRIND TESTING FOR A PROCESS ##### 
+valgrind --tool=memcheck --show-reachable=yes --leak-check=full --show-below-main=yes --trace-children=yes --track-fds=yes --leak-resolution=high --error-limit=no --track-origins=yes --log-file=valgrind.log ./process -c ../conf 
+
+####Show Color in Errors And Warnings#### 
+make() 
+{ 
+/usr/bin/make "$@" 2>&1 | sed -E -e "s/error/ $(echo -e "\\033[31m" 
+ERROR "\\033[0m"/g)" -e "s/warning/ $(echo -e "\\033[0;33m" WARNING "\\033[0m"/g)" return ${PIPESTATUS[0]} 
+} 
+
+###ssh passwordless ### 
+ssh-keygen -t rsa -b 2048 
+ssh-copy-id root@10.102.34.190 
+ssh root@10.102.34.190 #should not prompt for password
+
+#### mount disk ubuntu 
+#list all block devices 
+lsblk 
+mkdir /data1 
+mount /dev/sdb /data1 
+df -kh 
+#To make it permanent across reboots, add the following line for ext3 file system: /dev/sdb1 /media/newhd ext4 defaults 0 2 
+
+##### P4 client ############ 
+#add a file 
+p4 add -c CL# -t type <filename> 
+#delete a file 
+p4 delete -c CL# <filename> 
+#edit a file 
+p4 edit <filename> 
+#list of open files 
+p4 opened ... 
+#create a changelist 
+p4 changelist 
+#open a particular changelist 
+p4 change -u <chanegelist. no.> 
+#reopen a file in diff cl
+p4 reopen -c CL# <filename> 
+#post a review for a changelist 
+post-review <changelist. no.> 
+#Mark the bug as fixed in that branch 
+p4 fix -s Fixed -c <changelist. no.> <bug ID without the BUG/TSK prefix> 
+#submit the change 
+p4 submit -c <changelist .no.> 
+#shelve a change 
+p4 shelve -c CL# 
+#unshelve a change 
+p4 unshelve -s CL# 
+#change to which you are synced 
+p4 changes -m1 #have 
+#get file revision history 
+p4 filelog <filename> 
+#describe a change 
+p4 describe <CL#> 
+#annotate a file with revno's 
+p4 annotate <filename> 
+#delete a shelved CL 
+p4 shelve -c #changelist -d 
+#list changes on a client 
+p4 changes -c <client_name> [-s pending|committed|shelved] 
+#delete a changelist 
+p4 change -d CL# 
+#delete a client 
+p4 client -d <client_name> 
+#list of client 
+p4 clients -u mohitsi
+#revert a pending changelist 
+#(use Perforce depot notation 
+#instead of local directory notation 
+#because the local directory does not exist anymore) 
+p4 -c user_workspace revert -k //... 
+# to delete a changelist 
+CLIENT="name_of_your_client" 
+CHANGE="number_of_the_changelist_to_delete" 
+p4 [-u user] [-H host] -c $CLIENT shelve -c $CHANGE -d //... # Delete all shelved files from it. p4 -c $CLIENT revert -k -c $CHANGE //... # Revert all files from changelist (only metadata). p4 -c $CLIENT change -d $CHANGE # Finally delete the changelist. 
+
+### Others ### 
+touch -mt '201712111005.07' file.h 
+touch file.c 
+tailf out.txt | sed -e 's/DATA/$DATA/g' | tr -u '\n$' '|\n' 
+tailf out.txt | sed -e 's/DATA/$DATA/g' | tr -u '\n$' '|\n' | grep -e "DATA RECORD" -e "3257034250" 
+#BASH change prompt 
+export PS1='\u@\h: ' 
+#linux disable offload features 
+ethtool -K eth0 sg off tso off 
+ethtool -K eth0 gro off 
+# tcpdump filter for HTTP GET 
+sudo tcpdump -s 0 -A 'tcp[((tcp[12:1] & 0xf0) >> 2):4] = 0x47455420' 
+# tcpdump filter for HTTP POST 
+sudo tcpdump -s 0 -A 'tcp dst port 80 and (tcp[((tcp[12:1] & 0xf0) >> 2):4] = 0x504f5354)'
