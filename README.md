@@ -1,7 +1,7 @@
 ## Welcome to TPT
 
 This project contains a collection of simple and easy to use C programs written during my programming journey.
-These programs contain example demonstrating datastructures, algorithms, network programming, linux sysystem calls, linux IPC and various other concepts related to computer science.
+These programs contain examples demonstrating datastructures, algorithms, network programming, linux system calls, linux IPC and various other concepts related to computer science.
 
 ### Help
 
